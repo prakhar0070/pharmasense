@@ -1,0 +1,18 @@
+# Never commit secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Generated data/artifacts (optional to exclude -- keep if you want reviewers to see them)
+# pharmasense.db
+# rag_index.faiss
+# rag_metadata.pkl
+
+# Logs
+*.log
+agent_run_log.jsonl
+llm_usage_log.jsonl
+escalations.log
+evaluation_report*.json

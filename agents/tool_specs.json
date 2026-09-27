@@ -1,0 +1,82 @@
+{
+  "sql_query_tool": {
+    "name": "sql_query_tool",
+    "description": "Run a read-only SQL SELECT query against the PharmaSense database (compounds, clinical_trials, trial_sites, lab_results, adverse_events, research_documents). Only SELECT statements are permitted.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string", "description": "A parameterized SQL SELECT statement using ? placeholders."},
+        "params": {"type": "array", "items": {"type": "string"}, "description": "Values to bind to the ? placeholders, in order."}
+      },
+      "required": ["query"]
+    },
+    "used_by": ["Trial Data Analyst", "Adverse Event Triage", "Compound Similarity"]
+  },
+  "vector_search_tool": {
+    "name": "vector_search_tool",
+    "description": "Semantic search over the research_documents corpus. Returns the top-k most relevant passages, each with doc_id, title, doc_type, and date for citation.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {"type": "string", "description": "Natural-language question to search for."},
+        "k": {"type": "integer", "description": "Number of passages to return.", "default": 5}
+      },
+      "required": ["query"]
+    },
+    "used_by": ["Literature & Document Research"]
+  },
+  "ae_severity_classifier_tool": {
+    "name": "ae_severity_classifier_tool",
+    "description": "Classifies an adverse event's escalation priority based on severity, seriousness, and causality assessment.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "severity": {"type": "string", "enum": ["Mild", "Moderate", "Severe"]},
+        "seriousness": {"type": "string", "enum": ["Serious", "Non-serious"]},
+        "causality_assessment": {"type": "string", "enum": ["Related", "Possibly Related", "Unrelated"]}
+      },
+      "required": ["severity", "seriousness", "causality_assessment"]
+    },
+    "used_by": ["Adverse Event Triage"]
+  },
+  "compound_similarity_tool": {
+    "name": "compound_similarity_tool",
+    "description": "Finds the compounds most similar to a given compound_id, based on target protein, therapeutic area, molecular weight, solubility, and toxicity score.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "compound_id": {"type": "string", "description": "e.g. CMP-0001"},
+        "top_n": {"type": "integer", "default": 5}
+      },
+      "required": ["compound_id"]
+    },
+    "used_by": ["Compound Similarity", "Trial Data Analyst"]
+  },
+  "citation_formatter_tool": {
+    "name": "citation_formatter_tool",
+    "description": "Formats a list of retrieved passages (from vector_search_tool) into a numbered citation block.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "passages": {"type": "array", "description": "The list of passage objects returned by vector_search_tool."}
+      },
+      "required": ["passages"]
+    },
+    "used_by": ["Literature & Document Research"]
+  },
+  "escalation_notifier_tool": {
+    "name": "escalation_notifier_tool",
+    "description": "Logs an adverse event escalation to a human reviewer. Has a real side effect (writes to escalations.log) — call at most once per event.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "event_id": {"type": "string"},
+        "trial_id": {"type": "string"},
+        "priority": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+        "reason": {"type": "string"}
+      },
+      "required": ["event_id", "trial_id", "priority", "reason"]
+    },
+    "used_by": ["Adverse Event Triage"]
+  }
+}
