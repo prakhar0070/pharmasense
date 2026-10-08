@@ -62,16 +62,10 @@ def call_llm(prompt: str, system: str = "", tools: list = None, model: str = Non
 
 def _call_groq(prompt, system, tools, model):
     import streamlit as st
-    from openai import OpenAI
+    from groq import Groq
 
-    # Fallback to an active, reliable Groq model
-    valid_groq_models = [
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
-        "mixtral-8x7b-32768",
-    ]
-    if not model or model not in valid_groq_models:
-        model = "llama-3.1-8b-instant"
+    # Use a guaranteed, fast, supported Groq model
+    target_model = "llama-3.1-8b-instant"
 
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -83,17 +77,18 @@ def _call_groq(prompt, system, tools, model):
     if not api_key:
         raise ValueError("GROQ_API_KEY is missing from environment variables and st.secrets.")
 
-    client = OpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=api_key,
-    )
+    client = Groq(api_key=api_key)
 
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    kwargs = {"model": model, "messages": messages}
+    kwargs = {
+        "model": target_model,
+        "messages": messages,
+    }
+
     if tools:
         kwargs["tools"] = [_to_openai_tool_schema(t) for t in tools]
         kwargs["tool_choice"] = "auto"
@@ -111,7 +106,7 @@ def _call_groq(prompt, system, tools, model):
     return {
         "text": choice.message.content,
         "tool_calls": tool_calls,
-        "model": model,
+        "model": target_model,
         "usage": {
             "input_tokens": resp.usage.prompt_tokens,
             "output_tokens": resp.usage.completion_tokens,
