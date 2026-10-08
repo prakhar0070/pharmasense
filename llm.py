@@ -76,13 +76,9 @@ def _call_groq(prompt, system, tools, model):
     """Groq uses the OpenAI SDK format, just pointed at a different base_url."""
    from openai import OpenAI
 
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        try:
-            import streamlit as st
-            api_key = st.secrets["GROQ_API_KEY"]
-        except Exception:
-            api_key = None
+   import streamlit as st
+
+    api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
 
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
