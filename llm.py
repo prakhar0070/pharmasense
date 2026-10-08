@@ -63,10 +63,8 @@ def _call_groq(prompt, system, tools, model):
     import streamlit as st
     from groq import Groq
 
-    # Groq ka default active model
     model_name = "llama-3.3-70b-versatile"
 
-    # API key load karna (Environment ya Streamlit Secrets se)
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         try:
@@ -77,6 +75,7 @@ def _call_groq(prompt, system, tools, model):
     if not api_key:
         raise ValueError("GROQ_API_KEY Streamlit Secrets ya .env me nahi mila!")
 
+    api_key = str(api_key).strip().strip('"').strip("'")
     client = Groq(api_key=api_key)
 
     messages = []
@@ -221,3 +220,7 @@ if __name__ == "__main__":
     print(f"Provider configured: {PROVIDER}")
     try:
         result = call_llm("Say 'PharmaSense AI LLM connection working' and nothing else.")
+        print("Response:", result["text"])
+        print("Usage:", result["usage"])
+    except Exception as e:
+        print(f"Error: {e}")
