@@ -1,6 +1,5 @@
 """
 Governed LLM access layer for PharmaSense.
-Handles routing between Groq, OpenAI, and Anthropic.
 """
 
 import os
@@ -41,13 +40,13 @@ def call_llm(prompt: str, system: str = "", tools: list = None, model: str = Non
         raise ValueError(f"Unknown LLM_PROVIDER: {PROVIDER}")
 
     latency = time.time() - start
-    usage = result["usage"]
+    usage = result.get("usage", {"input_tokens": 0, "output_tokens": 0})
     price = PRICING.get(PROVIDER, {"input": 0, "output": 0})
     cost = (usage["input_tokens"] / 1000 * price["input"]) + (usage["output_tokens"] / 1000 * price["output"])
 
     _log_usage({
         "provider": PROVIDER,
-        "model": result["model"],
+        "model": result.get("model", "unknown"),
         "input_tokens": usage["input_tokens"],
         "output_tokens": usage["output_tokens"],
         "latency_sec": round(latency, 3),
@@ -63,6 +62,7 @@ def _call_groq(prompt, system, tools, model):
     import streamlit as st
     from groq import Groq
 
+    # Verified active model
     model_name = "llama-3.1-8b-instant"
 
     api_key = os.getenv("GROQ_API_KEY")
@@ -88,21 +88,38 @@ def _call_groq(prompt, system, tools, model):
         "messages": messages,
     }
 
+    # Format tools safely
+    formatted_tools = None
     if tools:
-        kwargs["tools"] = [_to_openai_tool_schema(t) for t in tools]
+        try:
+            formatted_tools = [_to_openai_tool_schema(t) for t in tools]
+        except Exception:
+            formatted_tools = None
 
-    resp = client.chat.completions.create(**kwargs)
+    if formatted_tools:
+        kwargs["tools"] = formatted_tools
+
+    # Try calling with tools, if 404/NotFoundError occurs, fallback without tools
+    try:
+        resp = client.chat.completions.create(**kwargs)
+    except Exception as e:
+        if "tools" in kwargs:
+            kwargs.pop("tools", None)
+            resp = client.chat.completions.create(**kwargs)
+        else:
+            raise e
+
     choice = resp.choices[0]
 
     tool_calls = None
-    if choice.message.tool_calls:
+    if hasattr(choice.message, "tool_calls") and choice.message.tool_calls:
         tool_calls = [
             {"name": tc.function.name, "arguments": json.loads(tc.function.arguments)}
             for tc in choice.message.tool_calls
         ]
 
     return {
-        "text": choice.message.content,
+        "text": choice.message.content or "",
         "tool_calls": tool_calls,
         "model": model_name,
         "usage": {
@@ -192,7 +209,7 @@ def _call_anthropic(prompt, system, tools, model):
         "model": model,
         "usage": {
             "input_tokens": resp.usage.input_tokens,
-            "output_tokens": resp.usage.output_tokens,
+            "output_tokens": resp.usage.completion_tokens,
         },
     }
 
