@@ -64,12 +64,24 @@ def _call_groq(prompt, system, tools, model):
     import streamlit as st
     from openai import OpenAI
 
-    # Fallback if an invalid/OpenAI model name was passed from upstream
-    valid_groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]
+    # Fallback to an active, reliable Groq model
+    valid_groq_models = [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "mixtral-8x7b-32768",
+    ]
     if not model or model not in valid_groq_models:
-        model = "llama-3.3-70b-versatile"
+        model = "llama-3.1-8b-instant"
 
-    api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets["GROQ_API_KEY"]
+        except Exception:
+            api_key = None
+
+    if not api_key:
+        raise ValueError("GROQ_API_KEY is missing from environment variables and st.secrets.")
 
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
@@ -84,6 +96,7 @@ def _call_groq(prompt, system, tools, model):
     kwargs = {"model": model, "messages": messages}
     if tools:
         kwargs["tools"] = [_to_openai_tool_schema(t) for t in tools]
+        kwargs["tool_choice"] = "auto"
 
     resp = client.chat.completions.create(**kwargs)
     choice = resp.choices[0]
@@ -110,7 +123,13 @@ def _call_openai(prompt, system, tools, model):
     import streamlit as st
     from openai import OpenAI
 
-    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets["OPENAI_API_KEY"]
+        except Exception:
+            api_key = None
+
     client = OpenAI(api_key=api_key)
 
     messages = []
@@ -147,7 +166,13 @@ def _call_anthropic(prompt, system, tools, model):
     import streamlit as st
     import anthropic
 
-    api_key = os.getenv("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except Exception:
+            api_key = None
+
     client = anthropic.Anthropic(api_key=api_key)
 
     kwargs = {
