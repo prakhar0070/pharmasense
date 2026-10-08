@@ -44,10 +44,10 @@ def call_llm(prompt: str, system: str = "", tools: list = None, model: str = Non
     """
     start = time.time()
 
-    if PROVIDER == "openai":
+    if PROVIDER == "groq":
+        result = _call_groq(prompt, system, tools, model or "llama-3.3-70b-versatile")
+    elif PROVIDER == "openai":
         result = _call_openai(prompt, system, tools, model or "gpt-4o-mini")
-    elif PROVIDER == "groq":
-        result = _call_groq(prompt, system, tools, model or "openai/gpt-oss-20b")
     elif PROVIDER == "anthropic":
         result = _call_anthropic(prompt, system, tools, model or "claude-3-5-haiku-20241022")
     else:
