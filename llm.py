@@ -1,47 +1,35 @@
 """
 Stage 2 (properly done): The governed LLM access layer.
 
-Every agent calls call_llm() instead of hitting an API directly -- this is
-the "single governed entry point" Step 2 of the guide asks for. It also
-logs every call's model, tokens, latency, and estimated cost to
-llm_usage_log.jsonl, which is your observability foundation for Step 7.
-
-Set LLM_PROVIDER in your .env file to "openai" or "anthropic".
+Every agent calls call_llm() instead of hitting an API directly.
 """
 
 import os
 import json
 import time
 from dotenv import load_dotenv
-import streamlit as st
+
 load_dotenv()
 
 PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 USAGE_LOG_PATH = "llm_usage_log.jsonl"
 
-# Rough public per-token prices (USD per 1K tokens) for cost logging.
-# These are approximate -- check current pricing pages for exact numbers.
 PRICING = {
-    "openai": {"input": 0.00015, "output": 0.0006},      # gpt-4o-mini ballpark
-    "anthropic": {"input": 0.0008, "output": 0.004},      # claude haiku ballpark
-    "groq": {"input": 0.0, "output": 0.0},                # free tier
+    "openai": {"input": 0.00015, "output": 0.0006},
+    "anthropic": {"input": 0.0008, "output": 0.004},
+    "groq": {"input": 0.0, "output": 0.0},
 }
 
 
 def _log_usage(entry: dict):
-    with open(USAGE_LOG_PATH, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    try:
+        with open(USAGE_LOG_PATH, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
 
 
 def call_llm(prompt: str, system: str = "", tools: list = None, model: str = None):
-    """
-    The single governed entry point every agent calls.
-
-    Returns a dict: {"text": ..., "tool_calls": [...] or None, "usage": {...}}
-    tool_calls, when present, is a list of {"name": ..., "arguments": {...}}
-    in a provider-agnostic shape, so router.py doesn't need to know which
-    provider is behind this call.
-    """
     start = time.time()
 
     if PROVIDER == "groq":
@@ -73,10 +61,8 @@ def call_llm(prompt: str, system: str = "", tools: list = None, model: str = Non
 
 
 def _call_groq(prompt, system, tools, model):
-    """Groq uses the OpenAI SDK format, just pointed at a different base_url."""
-   from openai import OpenAI
-
-   import streamlit as st
+    import streamlit as st
+    from openai import OpenAI
 
     api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
 
@@ -116,8 +102,11 @@ def _call_groq(prompt, system, tools, model):
 
 
 def _call_openai(prompt, system, tools, model):
+    import streamlit as st
     from openai import OpenAI
-    client = OpenAI()
+
+    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+    client = OpenAI(api_key=api_key)
 
     messages = []
     if system:
@@ -150,8 +139,11 @@ def _call_openai(prompt, system, tools, model):
 
 
 def _call_anthropic(prompt, system, tools, model):
+    import streamlit as st
     import anthropic
-    client = anthropic.Anthropic()
+
+    api_key = os.getenv("ANTHROPIC_API_KEY") or st.secrets.get("ANTHROPIC_API_KEY")
+    client = anthropic.Anthropic(api_key=api_key)
 
     kwargs = {
         "model": model,
@@ -183,21 +175,19 @@ def _call_anthropic(prompt, system, tools, model):
 
 
 def _to_openai_tool_schema(spec):
-    return {"type": "function", "function": {
-        "name": spec["name"], "description": spec["description"], "parameters": spec["parameters"],
-    }}
+    return {
+        "type": "function",
+        "function": {
+            "name": spec["name"],
+            "description": spec["description"],
+            "parameters": spec["parameters"],
+        },
+    }
 
 
 def _to_anthropic_tool_schema(spec):
-    return {"name": spec["name"], "description": spec["description"], "input_schema": spec["parameters"]}
-
-
-if __name__ == "__main__":
-    print(f"Provider configured: {PROVIDER}")
-    try:
-        result = call_llm("Say 'PharmaSense AI LLM connection working' and nothing else.")
-        print("Response:", result["text"])
-        print("Usage:", result["usage"])
-    except Exception as e:
-        print(f"Error: {e}")
-        print("\nMake sure you've created a .env file (copy .env.example) with a real API key.")
+    return {
+        "name": spec["name"],
+        "description": spec["description"],
+        "input_schema": spec["parameters"],
+    }
