@@ -13,10 +13,10 @@ import os
 import json
 import time
 from dotenv import load_dotenv
-
+import streamlit as st
 load_dotenv()
 
-PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 USAGE_LOG_PATH = "llm_usage_log.jsonl"
 
 # Rough public per-token prices (USD per 1K tokens) for cost logging.
@@ -74,10 +74,19 @@ def call_llm(prompt: str, system: str = "", tools: list = None, model: str = Non
 
 def _call_groq(prompt, system, tools, model):
     """Groq uses the OpenAI SDK format, just pointed at a different base_url."""
-    from openai import OpenAI
+   from openai import OpenAI
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        try:
+            import streamlit as st
+            api_key = st.secrets["GROQ_API_KEY"]
+        except Exception:
+            api_key = None
+
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
-        api_key=os.getenv("GROQ_API_KEY"),
+        api_key=api_key,
     )
 
     messages = []
