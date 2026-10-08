@@ -63,7 +63,8 @@ def _call_groq(prompt, system, tools, model):
     import streamlit as st
     from groq import Groq
 
-    model_name = "llama-3.3-70b-versatile"
+    # Active and verified Groq production model
+    model_name = "llama-3.1-8b-instant"
 
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -192,35 +193,4 @@ def _call_anthropic(prompt, system, tools, model):
         "model": model,
         "usage": {
             "input_tokens": resp.usage.input_tokens,
-            "output_tokens": resp.usage.output_tokens,
-        },
-    }
-
-
-def _to_openai_tool_schema(spec):
-    return {
-        "type": "function",
-        "function": {
-            "name": spec["name"],
-            "description": spec["description"],
-            "parameters": spec["parameters"],
-        },
-    }
-
-
-def _to_anthropic_tool_schema(spec):
-    return {
-        "name": spec["name"],
-        "description": spec["description"],
-        "input_schema": spec["parameters"],
-    }
-
-
-if __name__ == "__main__":
-    print(f"Provider configured: {PROVIDER}")
-    try:
-        result = call_llm("Say 'PharmaSense AI LLM connection working' and nothing else.")
-        print("Response:", result["text"])
-        print("Usage:", result["usage"])
-    except Exception as e:
-        print(f"Error: {e}")
+            "output_tokens": resp.
