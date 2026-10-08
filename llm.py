@@ -1,7 +1,6 @@
 """
-Stage 2 (properly done): The governed LLM access layer.
-
-Every agent calls call_llm() instead of hitting an API directly.
+Stage 2: The governed LLM access layer.
+Single entry point for all agents calling LLMs.
 """
 
 import os
@@ -64,9 +63,10 @@ def _call_groq(prompt, system, tools, model):
     import streamlit as st
     from groq import Groq
 
-    # Use a guaranteed, fast, supported Groq model
-    target_model = "llama-3.1-8b-instant"
+    # Groq ka default active model
+    model_name = "llama-3.3-70b-versatile"
 
+    # API key load karna (Environment ya Streamlit Secrets se)
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         try:
@@ -75,7 +75,7 @@ def _call_groq(prompt, system, tools, model):
             api_key = None
 
     if not api_key:
-        raise ValueError("GROQ_API_KEY is missing from environment variables and st.secrets.")
+        raise ValueError("GROQ_API_KEY Streamlit Secrets ya .env me nahi mila!")
 
     client = Groq(api_key=api_key)
 
@@ -85,13 +85,12 @@ def _call_groq(prompt, system, tools, model):
     messages.append({"role": "user", "content": prompt})
 
     kwargs = {
-        "model": target_model,
+        "model": model_name,
         "messages": messages,
     }
 
     if tools:
         kwargs["tools"] = [_to_openai_tool_schema(t) for t in tools]
-        kwargs["tool_choice"] = "auto"
 
     resp = client.chat.completions.create(**kwargs)
     choice = resp.choices[0]
@@ -106,7 +105,7 @@ def _call_groq(prompt, system, tools, model):
     return {
         "text": choice.message.content,
         "tool_calls": tool_calls,
-        "model": target_model,
+        "model": model_name,
         "usage": {
             "input_tokens": resp.usage.prompt_tokens,
             "output_tokens": resp.usage.completion_tokens,
@@ -222,7 +221,3 @@ if __name__ == "__main__":
     print(f"Provider configured: {PROVIDER}")
     try:
         result = call_llm("Say 'PharmaSense AI LLM connection working' and nothing else.")
-        print("Response:", result["text"])
-        print("Usage:", result["usage"])
-    except Exception as e:
-        print(f"Error: {e}")
