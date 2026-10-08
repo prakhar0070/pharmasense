@@ -33,7 +33,7 @@ def call_llm(prompt: str, system: str = "", tools: list = None, model: str = Non
     start = time.time()
 
     if PROVIDER == "groq":
-        result = _call_groq(prompt, system, tools, model or "llama-3.3-70b-versatile")
+        result = _call_groq(prompt, system, tools, model)
     elif PROVIDER == "openai":
         result = _call_openai(prompt, system, tools, model or "gpt-4o-mini")
     elif PROVIDER == "anthropic":
@@ -63,6 +63,11 @@ def call_llm(prompt: str, system: str = "", tools: list = None, model: str = Non
 def _call_groq(prompt, system, tools, model):
     import streamlit as st
     from openai import OpenAI
+
+    # Fallback if an invalid/OpenAI model name was passed from upstream
+    valid_groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]
+    if not model or model not in valid_groq_models:
+        model = "llama-3.3-70b-versatile"
 
     api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
 
@@ -191,3 +196,13 @@ def _to_anthropic_tool_schema(spec):
         "description": spec["description"],
         "input_schema": spec["parameters"],
     }
+
+
+if __name__ == "__main__":
+    print(f"Provider configured: {PROVIDER}")
+    try:
+        result = call_llm("Say 'PharmaSense AI LLM connection working' and nothing else.")
+        print("Response:", result["text"])
+        print("Usage:", result["usage"])
+    except Exception as e:
+        print(f"Error: {e}")
