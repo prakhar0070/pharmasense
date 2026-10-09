@@ -1,82 +1,95 @@
 """
-Governed LLM access layer for PharmaSense.
+llm.py - Groq LLM wrapper with automatic fallback when a model returns 404.
+
+Drop-in replacement for the call_llm / _call_groq functions used by
+llm_router.py:
+
+    response = call_llm(prompt=question, system=ROUTER_SYSTEM_PROMPT,
+                        tools=tool_list)
+
+Returns the assistant message object (resp.choices[0].message), so you can use
+response.content and response.tool_calls as usual.
 """
 
 import os
-import json
-import time
-from dotenv import load_dotenv
 
-load_dotenv()
+from groq import Groq, NotFoundError
 
-PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
-USAGE_LOG_PATH = "llm_usage_log.jsonl"
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
-PRICING = {
-    "openai": {"input": 0.00015, "output": 0.0006},
-    "anthropic": {"input": 0.0008, "output": 0.004},
-    "groq": {"input": 0.0, "output": 0.0},
-}
+# Models are tried in this order. Check https://console.groq.com/docs/models
+# and edit this list if Groq retires or renames a model.
+DEFAULT_MODEL = "llama-3.3-70b-versatile"
+FALLBACK_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
 
 
-def _log_usage(entry: dict):
+def _get_secret(name, default=None):
+    """Read a setting from Streamlit secrets first, then environment variables."""
     try:
-        with open(USAGE_LOG_PATH, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        import streamlit as st
+
+        if name in st.secrets:
+            return st.secrets[name]
     except Exception:
         pass
+    return os.getenv(name, default)
 
 
-def call_llm(prompt: str, system: str = "", tools: list = None, model: str = None):
-    start = time.time()
-
-    if PROVIDER == "groq":
-        result = _call_groq(prompt, system, tools, model)
-    elif PROVIDER == "openai":
-        result = _call_openai(prompt, system, tools, model or "gpt-4o-mini")
-    elif PROVIDER == "anthropic":
-        result = _call_anthropic(prompt, system, tools, model or "claude-3-5-haiku-20241022")
-    else:
-        raise ValueError(f"Unknown LLM_PROVIDER: {PROVIDER}")
-
-    latency = time.time() - start
-    usage = result.get("usage", {"input_tokens": 0, "output_tokens": 0})
-    price = PRICING.get(PROVIDER, {"input": 0, "output": 0})
-    cost = (usage["input_tokens"] / 1000 * price["input"]) + (usage["output_tokens"] / 1000 * price["output"])
-
-    _log_usage({
-        "provider": PROVIDER,
-        "model": result.get("model", "unknown"),
-        "input_tokens": usage["input_tokens"],
-        "output_tokens": usage["output_tokens"],
-        "latency_sec": round(latency, 3),
-        "cost_usd_est": round(cost, 6),
-    })
-
-    result["usage"]["cost_usd_est"] = round(cost, 6)
-    result["usage"]["latency_sec"] = round(latency, 3)
-    return result
-
-
-def _call_groq(prompt, system, tools, model):
-    import streamlit as st
-    from groq import Groq
-
-    # Verified active model
-    model_name = "llama-3.1-8b-instant"
-
-    api_key = os.getenv("GROQ_API_KEY")
+def _get_client():
+    api_key = _get_secret("GROQ_API_KEY")
     if not api_key:
+        raise RuntimeError(
+            "GROQ_API_KEY is missing. Set it in .env (local) or in "
+            "Streamlit Cloud -> Settings -> Secrets."
+        )
+
+    # Only pass base_url if you really need a custom one.
+    # Correct value is "https://api.groq.com" (the SDK adds /openai/v1 itself).
+    base_url = _get_secret("GROQ_BASE_URL")
+    if base_url:
+        return Groq(api_key=api_key, base_url=base_url)
+    return Groq(api_key=api_key)
+
+
+# ---------------------------------------------------------------------------
+# Public function
+# ---------------------------------------------------------------------------
+
+def call_llm(prompt, system=None, tools=None, model=None, temperature=0.2):
+    """Send a prompt to Groq and return the assistant message."""
+    # Model priority: function argument > GROQ_MODEL setting > DEFAULT_MODEL
+    chosen = model or _get_secret("GROQ_MODEL") or DEFAULT_MODEL
+
+    # Try the chosen model first, then the fallbacks (without duplicates)
+    candidates = [chosen] + [m for m in FALLBACK_MODELS if m != chosen]
+
+    last_error = None
+    for name in candidates:
         try:
-            api_key = st.secrets["GROQ_API_KEY"]
-        except Exception:
-            api_key = None
+            return _call_groq(prompt, system, tools, name, temperature)
+        except NotFoundError as e:
+            # 404 = model not found / retired. Try the next one.
+            last_error = e
+            print(f"[llm] Model '{name}' not found, trying next...")
+            continue
 
-    if not api_key:
-        raise ValueError("GROQ_API_KEY Streamlit Secrets ya .env me nahi mila!")
+    raise RuntimeError(
+        "None of the configured Groq models were found. "
+        "Update FALLBACK_MODELS in llm.py using https://console.groq.com/docs/models"
+    ) from last_error
 
-    api_key = str(api_key).strip().strip('"').strip("'")
-    client = Groq(api_key=api_key)
+
+# ---------------------------------------------------------------------------
+# Internal
+# ---------------------------------------------------------------------------
+
+def _call_groq(prompt, system, tools, model, temperature=0.2):
+    client = _get_client()
 
     messages = []
     if system:
@@ -84,150 +97,16 @@ def _call_groq(prompt, system, tools, model):
     messages.append({"role": "user", "content": prompt})
 
     kwargs = {
-        "model": model_name,
+        "model": model,
         "messages": messages,
+        "temperature": temperature,
     }
 
-    # Format tools safely
-    formatted_tools = None
+    # tools must be in OpenAI function-calling format:
+    # [{"type": "function", "function": {"name": ..., "description": ..., "parameters": {...}}}]
     if tools:
-        try:
-            formatted_tools = [_to_openai_tool_schema(t) for t in tools]
-        except Exception:
-            formatted_tools = None
-
-    if formatted_tools:
-        kwargs["tools"] = formatted_tools
-
-    # Try calling with tools, if 404/NotFoundError occurs, fallback without tools
-    try:
-        resp = client.chat.completions.create(**kwargs)
-    except Exception as e:
-        if "tools" in kwargs:
-            kwargs.pop("tools", None)
-            resp = client.chat.completions.create(**kwargs)
-        else:
-            raise e
-
-    choice = resp.choices[0]
-
-    tool_calls = None
-    if hasattr(choice.message, "tool_calls") and choice.message.tool_calls:
-        tool_calls = [
-            {"name": tc.function.name, "arguments": json.loads(tc.function.arguments)}
-            for tc in choice.message.tool_calls
-        ]
-
-    return {
-        "text": choice.message.content or "",
-        "tool_calls": tool_calls,
-        "model": model_name,
-        "usage": {
-            "input_tokens": resp.usage.prompt_tokens,
-            "output_tokens": resp.usage.completion_tokens,
-        },
-    }
-
-
-def _call_openai(prompt, system, tools, model):
-    import streamlit as st
-    from openai import OpenAI
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        try:
-            api_key = st.secrets["OPENAI_API_KEY"]
-        except Exception:
-            api_key = None
-
-    client = OpenAI(api_key=api_key)
-
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-
-    kwargs = {"model": model, "messages": messages}
-    if tools:
-        kwargs["tools"] = [_to_openai_tool_schema(t) for t in tools]
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
 
     resp = client.chat.completions.create(**kwargs)
-    choice = resp.choices[0]
-
-    tool_calls = None
-    if choice.message.tool_calls:
-        tool_calls = [
-            {"name": tc.function.name, "arguments": json.loads(tc.function.arguments)}
-            for tc in choice.message.tool_calls
-        ]
-
-    return {
-        "text": choice.message.content,
-        "tool_calls": tool_calls,
-        "model": model,
-        "usage": {
-            "input_tokens": resp.usage.prompt_tokens,
-            "output_tokens": resp.usage.completion_tokens,
-        },
-    }
-
-
-def _call_anthropic(prompt, system, tools, model):
-    import streamlit as st
-    import anthropic
-
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        try:
-            api_key = st.secrets["ANTHROPIC_API_KEY"]
-        except Exception:
-            api_key = None
-
-    client = anthropic.Anthropic(api_key=api_key)
-
-    kwargs = {
-        "model": model,
-        "max_tokens": 1024,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    if system:
-        kwargs["system"] = system
-    if tools:
-        kwargs["tools"] = [_to_anthropic_tool_schema(t) for t in tools]
-
-    resp = client.messages.create(**kwargs)
-
-    text_parts = [b.text for b in resp.content if b.type == "text"]
-    tool_calls = [
-        {"name": b.name, "arguments": b.input}
-        for b in resp.content if b.type == "tool_use"
-    ] or None
-
-    return {
-        "text": "".join(text_parts) if text_parts else None,
-        "tool_calls": tool_calls,
-        "model": model,
-        "usage": {
-            "input_tokens": resp.usage.input_tokens,
-            "output_tokens": resp.usage.completion_tokens,
-        },
-    }
-
-
-def _to_openai_tool_schema(spec):
-    return {
-        "type": "function",
-        "function": {
-            "name": spec["name"],
-            "description": spec["description"],
-            "parameters": spec["parameters"],
-        },
-    }
-
-
-def _to_anthropic_tool_schema(spec):
-    return {
-        "name": spec["name"],
-        "description": spec["description"],
-        "input_schema": spec["parameters"],
-    }
+    return resp.choices[0].message
