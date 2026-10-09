@@ -13,7 +13,7 @@ response.content and response.tool_calls as usual.
 
 import os
 
-from groq import Groq, NotFoundError
+from groq import BadRequestError, Groq, NotFoundError
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -77,6 +77,18 @@ def call_llm(prompt, system=None, tools=None, model=None, temperature=0.2):
             last_error = e
             print(f"[llm] Model '{name}' not found, trying next...")
             continue
+        except BadRequestError as e:
+            # 400 = request rejected (bad tool format, tool call failed, etc.)
+            last_error = e
+            print(f"[llm] 400 BadRequest from '{name}': {e}")
+            if tools:
+                # Last resort: retry once without tools so the app still answers.
+                try:
+                    print("[llm] Retrying without tools...")
+                    return _call_groq(prompt, system, None, name, temperature)
+                except BadRequestError as e2:
+                    last_error = e2
+            continue
 
     raise RuntimeError(
         "None of the configured Groq models were found. "
@@ -87,6 +99,49 @@ def call_llm(prompt, system=None, tools=None, model=None, temperature=0.2):
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
+
+def _normalize_tools(tools):
+    """Convert tools into the OpenAI/Groq format if they are in another shape."""
+    if not tools:
+        return None
+
+    fixed = []
+    for t in tools:
+        if not isinstance(t, dict):
+            continue
+
+        # Already correct: {"type": "function", "function": {...}}
+        if t.get("type") == "function" and "function" in t:
+            fn = t["function"]
+            params = fn.get("parameters") or {"type": "object", "properties": {}}
+            params.setdefault("type", "object")
+            params.setdefault("properties", {})
+            fn["parameters"] = params
+            fixed.append(t)
+            continue
+
+        # Flat shape: {"name": ..., "description": ..., "parameters"/"input_schema": {...}}
+        if "name" in t:
+            params = (
+                t.get("parameters")
+                or t.get("input_schema")
+                or {"type": "object", "properties": {}}
+            )
+            params.setdefault("type", "object")
+            params.setdefault("properties", {})
+            fixed.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "parameters": params,
+                    },
+                }
+            )
+
+    return fixed or None
+
 
 def _call_groq(prompt, system, tools, model, temperature=0.2):
     client = _get_client()
@@ -104,6 +159,7 @@ def _call_groq(prompt, system, tools, model, temperature=0.2):
 
     # tools must be in OpenAI function-calling format:
     # [{"type": "function", "function": {"name": ..., "description": ..., "parameters": {...}}}]
+    tools = _normalize_tools(tools)
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
