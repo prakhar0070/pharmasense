@@ -11,6 +11,7 @@ Returns the assistant message object (resp.choices[0].message), so you can use
 response.content and response.tool_calls as usual.
 """
 
+import json
 import os
 
 from groq import BadRequestError, Groq, NotFoundError
@@ -210,4 +211,43 @@ def _call_groq(prompt, system, tools, model, temperature=0.2):
         kwargs["tool_choice"] = "auto"
 
     resp = client.chat.completions.create(**kwargs)
-    return resp.choices[0].message
+    msg = resp.choices[0].message
+
+    # Convert tool calls into plain dicts
+    tool_calls = []
+    for tc in (getattr(msg, "tool_calls", None) or []):
+        raw_args = tc.function.arguments or "{}"
+        try:
+            parsed_args = json.loads(raw_args)
+        except Exception:
+            parsed_args = {}
+        tool_calls.append(
+            {
+                "id": tc.id,
+                "name": tc.function.name,
+                "arguments": parsed_args,
+                "function": {"name": tc.function.name, "arguments": raw_args},
+            }
+        )
+
+    # Token usage as a plain dict
+    u = getattr(resp, "usage", None)
+    prompt_t = getattr(u, "prompt_tokens", 0) or 0
+    completion_t = getattr(u, "completion_tokens", 0) or 0
+    usage = {
+        "prompt_tokens": prompt_t,
+        "completion_tokens": completion_t,
+        "total_tokens": getattr(u, "total_tokens", prompt_t + completion_t) or 0,
+        "input_tokens": prompt_t,
+        "output_tokens": completion_t,
+    }
+
+    text = msg.content or ""
+    return {
+        "content": text,
+        "text": text,
+        "tool_calls": tool_calls,
+        "usage": usage,
+        "model": model,
+        "message": msg,
+    }
