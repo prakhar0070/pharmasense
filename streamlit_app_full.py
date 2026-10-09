@@ -59,7 +59,11 @@ with tab_chat:
 
         with st.chat_message("assistant"):
             with st.spinner("LLM is deciding which tool(s) to call..."):
-                response = llm_route(question, session_id="streamlit-session")
+                try:
+    response = llm_route(question, session_id="streamlit-session")
+except Exception as e:
+    st.error(f"Real error: {e}")
+    st.stop()
             result = response.get("result")
             answer_text = result if isinstance(result, str) else str(result)
             meta = f"agent: {response.get('agent')} · tool(s): {response.get('tool_used')}"
