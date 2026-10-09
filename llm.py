@@ -90,15 +90,60 @@ def call_llm(prompt, system=None, tools=None, model=None, temperature=0.2):
                     last_error = e2
             continue
 
+    # All configured models failed -> ask Groq which models exist right now
+    try:
+        available = _list_available_models()
+    except Exception as e:
+        print(f"[llm] Could not list models: {e}")
+        available = []
+
+    for name in available:
+        if name in candidates:
+            continue
+        try:
+            print(f"[llm] Trying auto-discovered model '{name}'...")
+            return _call_groq(prompt, system, tools, name, temperature)
+        except (NotFoundError, BadRequestError) as e:
+            last_error = e
+            print(f"[llm] '{name}' failed: {e}")
+            continue
+
+    print(f"[llm] FINAL ERROR: {last_error}")
     raise RuntimeError(
-        "None of the configured Groq models were found. "
-        "Update FALLBACK_MODELS in llm.py using https://console.groq.com/docs/models"
+        f"No Groq model worked. Last error: {last_error}"
     ) from last_error
 
 
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
+
+def _list_available_models():
+    """Ask Groq for the chat models currently available to this API key."""
+    client = _get_client()
+    skip = ("whisper", "guard", "tts", "playai", "embed", "orpheus", "safeguard")
+
+    names = []
+    for m in client.models.list().data:
+        mid = m.id
+        if any(s in mid.lower() for s in skip):
+            continue
+        if getattr(m, "active", True) is False:
+            continue
+        names.append(mid)
+
+    def rank(n):
+        n = n.lower()
+        if "llama" in n and any(k in n for k in ("70b", "versatile", "scout", "maverick")):
+            return (0, n)
+        if "llama" in n or "gpt-oss" in n:
+            return (1, n)
+        return (2, n)
+
+    names.sort(key=rank)
+    print("[llm] Available models:", names)
+    return names
+
 
 def _normalize_tools(tools):
     """Convert tools into the OpenAI/Groq format if they are in another shape."""
